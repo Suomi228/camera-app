@@ -9,9 +9,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -28,7 +30,6 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import com.example.cameraapp.R;
 import com.example.cameraapp.databinding.FragmentGalleryBinding;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,7 @@ import java.util.concurrent.Executors;
 
 public class GalleryFragment extends Fragment {
 
+    private static final String TAG = "GalleryFragment";
     private FragmentGalleryBinding binding;
     private GalleryAdapter adapter;
     private static final int GRID_SPAN_COUNT = 3;
@@ -111,13 +113,18 @@ public class GalleryFragment extends Fragment {
 
     private boolean hasRequiredPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return ContextCompat.checkSelfPermission(requireContext(),
-                    Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
-                   ContextCompat.checkSelfPermission(requireContext(),
+            boolean images = ContextCompat.checkSelfPermission(requireContext(),
+                    Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED;
+            boolean video = ContextCompat.checkSelfPermission(requireContext(),
                     Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
+            Log.d(TAG, "Permission READ_MEDIA_IMAGES: " + images);
+            Log.d(TAG, "Permission READ_MEDIA_VIDEO: " + video);
+            return images && video;
         } else {
-            return ContextCompat.checkSelfPermission(requireContext(),
+            boolean storage = ContextCompat.checkSelfPermission(requireContext(),
                     Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+            Log.d(TAG, "Permission READ_EXTERNAL_STORAGE: " + storage);
+            return storage;
         }
     }
 
@@ -135,30 +142,43 @@ public class GalleryFragment extends Fragment {
     }
 
     private void handlePermissionResult(Map<String, Boolean> results) {
-        if (hasRequiredPermissions()) {
-            loadMediaFiles();
-        } else {
-            showEmptyState();
-        }
+        Log.d(TAG, "Permission results: " + results);
+        loadMediaFiles();
     }
 
     private void loadMediaFiles() {
+        if (binding == null) return;
+        
         binding.progressBar.setVisibility(View.VISIBLE);
         binding.emptyState.setVisibility(View.GONE);
         binding.rvGallery.setVisibility(View.GONE);
 
         executor.execute(() -> {
             List<MediaItem> mediaItems = new ArrayList<>();
-            mediaItems.addAll(loadImages());
-            mediaItems.addAll(loadVideos());
+            
+            List<MediaItem> images = loadImages();
+            List<MediaItem> videos = loadVideos();
+            
+            Log.d(TAG, "Loaded images: " + images.size());
+            Log.d(TAG, "Loaded videos: " + videos.size());
+            
+            mediaItems.addAll(images);
+            mediaItems.addAll(videos);
             
             mediaItems.sort((a, b) -> Long.compare(b.getDateAdded(), a.getDateAdded()));
             
-            if (isAdded()) {
+            if (isAdded() && binding != null) {
                 requireActivity().runOnUiThread(() -> {
+                    if (binding == null) return;
                     binding.progressBar.setVisibility(View.GONE);
+                    
+                    Log.d(TAG, "Total media items: " + mediaItems.size());
+                    
                     if (mediaItems.isEmpty()) {
                         showEmptyState();
+                        Toast.makeText(requireContext(), 
+                            "Найдено: фото=" + images.size() + ", видео=" + videos.size(), 
+                            Toast.LENGTH_LONG).show();
                     } else {
                         showGallery(mediaItems);
                     }
@@ -169,56 +189,60 @@ public class GalleryFragment extends Fragment {
     
     private List<MediaItem> loadImages() {
         List<MediaItem> images = new ArrayList<>();
-        ContentResolver resolver = requireContext().getContentResolver();
         
-        Uri collection;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL);
-        } else {
-            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-        }
-        
-        String[] projection = {
-                MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DISPLAY_NAME,
-                MediaStore.Images.Media.DATE_ADDED,
-                MediaStore.Images.Media.SIZE,
-                MediaStore.Images.Media.DATA
-        };
-        
-        String selection = MediaStore.Images.Media.DATA + " LIKE ?";
-        String[] selectionArgs = new String[]{"%CameraApp%"};
-        String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
-        
-        try (Cursor cursor = resolver.query(collection, projection, selection, selectionArgs, sortOrder)) {
-            if (cursor != null) {
-                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
-                int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
-                int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED);
-                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE);
-                
-                while (cursor.moveToNext()) {
-                    long id = cursor.getLong(idColumn);
-                    String name = cursor.getString(nameColumn);
-                    long dateAdded = cursor.getLong(dateColumn);
-                    long size = cursor.getLong(sizeColumn);
+        try {
+            ContentResolver resolver = requireContext().getContentResolver();
+            
+            Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            
+            String[] projection = {
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.DATE_ADDED,
+                    MediaStore.Images.Media.SIZE
+            };
+            
+            String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
+            
+            try (Cursor cursor = resolver.query(collection, projection, null, null, sortOrder)) {
+                if (cursor != null) {
+                    Log.d(TAG, "Images cursor count: " + cursor.getCount());
                     
-                    Uri contentUri = ContentUris.withAppendedId(
-                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
+                    int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+                    int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
+                    int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED);
+                    int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE);
                     
-                    MediaItem item = new MediaItem.Builder()
-                            .setId(id)
-                            .setUri(contentUri)
-                            .setType(MediaItem.MediaType.PHOTO)
-                            .setDisplayName(name)
-                            .setDateAdded(dateAdded)
-                            .setSize(size)
-                            .build();
-                    
-                    images.add(item);
+                    int count = 0;
+                    while (cursor.moveToNext() && count < 50) {
+                        long id = cursor.getLong(idColumn);
+                        String name = cursor.getString(nameColumn);
+                        long dateAdded = cursor.getLong(dateColumn);
+                        long size = cursor.getLong(sizeColumn);
+                        
+                        Uri contentUri = ContentUris.withAppendedId(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
+                        
+                        Log.d(TAG, "Found image: " + name + ", uri: " + contentUri);
+                        
+                        MediaItem item = new MediaItem.Builder()
+                                .setId(id)
+                                .setUri(contentUri)
+                                .setType(MediaItem.MediaType.PHOTO)
+                                .setDisplayName(name)
+                                .setDateAdded(dateAdded)
+                                .setSize(size)
+                                .build();
+                        
+                        images.add(item);
+                        count++;
+                    }
+                } else {
+                    Log.e(TAG, "Images cursor is null");
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading images", e);
         }
         
         return images;
@@ -226,90 +250,90 @@ public class GalleryFragment extends Fragment {
     
     private List<MediaItem> loadVideos() {
         List<MediaItem> videos = new ArrayList<>();
-        ContentResolver resolver = requireContext().getContentResolver();
         
-        Uri collection;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL);
-        } else {
-            collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-        }
-        
-        String[] projection = {
-                MediaStore.Video.Media._ID,
-                MediaStore.Video.Media.DISPLAY_NAME,
-                MediaStore.Video.Media.DATE_ADDED,
-                MediaStore.Video.Media.DURATION,
-                MediaStore.Video.Media.SIZE,
-                MediaStore.Video.Media.DATA
-        };
-        
-        String selection = MediaStore.Video.Media.DATA + " LIKE ?";
-        String[] selectionArgs = new String[]{"%CameraApp%"};
-        String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
-        
-        try (Cursor cursor = resolver.query(collection, projection, selection, selectionArgs, sortOrder)) {
-            if (cursor != null) {
-                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
-                int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
-                int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED);
-                int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
-                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
-                
-                while (cursor.moveToNext()) {
-                    long id = cursor.getLong(idColumn);
-                    String name = cursor.getString(nameColumn);
-                    long dateAdded = cursor.getLong(dateColumn);
-                    long duration = cursor.getLong(durationColumn);
-                    long size = cursor.getLong(sizeColumn);
+        try {
+            ContentResolver resolver = requireContext().getContentResolver();
+            
+            Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            
+            String[] projection = {
+                    MediaStore.Video.Media._ID,
+                    MediaStore.Video.Media.DISPLAY_NAME,
+                    MediaStore.Video.Media.DATE_ADDED,
+                    MediaStore.Video.Media.DURATION,
+                    MediaStore.Video.Media.SIZE
+            };
+            
+            String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
+            
+            try (Cursor cursor = resolver.query(collection, projection, null, null, sortOrder)) {
+                if (cursor != null) {
+                    Log.d(TAG, "Videos cursor count: " + cursor.getCount());
                     
-                    Uri contentUri = ContentUris.withAppendedId(
-                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+                    int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
+                    int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
+                    int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED);
+                    int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
+                    int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
                     
-                    MediaItem item = new MediaItem.Builder()
-                            .setId(id)
-                            .setUri(contentUri)
-                            .setType(MediaItem.MediaType.VIDEO)
-                            .setDisplayName(name)
-                            .setDateAdded(dateAdded)
-                            .setDuration(duration)
-                            .setSize(size)
-                            .build();
-                    
-                    videos.add(item);
+                    int count = 0;
+                    while (cursor.moveToNext() && count < 50) {
+                        long id = cursor.getLong(idColumn);
+                        String name = cursor.getString(nameColumn);
+                        long dateAdded = cursor.getLong(dateColumn);
+                        long duration = cursor.getLong(durationColumn);
+                        long size = cursor.getLong(sizeColumn);
+                        
+                        Uri contentUri = ContentUris.withAppendedId(
+                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+                        
+                        Log.d(TAG, "Found video: " + name + ", uri: " + contentUri);
+                        
+                        MediaItem item = new MediaItem.Builder()
+                                .setId(id)
+                                .setUri(contentUri)
+                                .setType(MediaItem.MediaType.VIDEO)
+                                .setDisplayName(name)
+                                .setDateAdded(dateAdded)
+                                .setDuration(duration)
+                                .setSize(size)
+                                .build();
+                        
+                        videos.add(item);
+                        count++;
+                    }
+                } else {
+                    Log.e(TAG, "Videos cursor is null");
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading videos", e);
         }
         
         return videos;
     }
 
     private void showGallery(List<MediaItem> items) {
+        if (binding == null) return;
         binding.emptyState.setVisibility(View.GONE);
         binding.rvGallery.setVisibility(View.VISIBLE);
         adapter.setItems(items);
     }
 
     private void showEmptyState() {
+        if (binding == null) return;
         binding.emptyState.setVisibility(View.VISIBLE);
         binding.rvGallery.setVisibility(View.GONE);
     }
 
     private void openMediaViewer(MediaItem item) {
-        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
-        if (item.isPhoto()) {
-            intent.setDataAndType(item.getUri(), "image/*");
-        } else {
-            intent.setDataAndType(item.getUri(), "video/*");
-        }
-        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try {
-            startActivity(intent);
-        } catch (Exception e) {
-            android.widget.Toast.makeText(requireContext(), "Не удалось открыть файл", 
-                    android.widget.Toast.LENGTH_SHORT).show();
-        }
+        Bundle args = new Bundle();
+        args.putString("uri", item.getUri().toString());
+        args.putBoolean("isVideo", item.isVideo());
+        args.putString("displayName", item.getDisplayName());
+        
+        Navigation.findNavController(binding.getRoot())
+                .navigate(R.id.action_gallery_to_viewer, args);
     }
 
     private void showDeleteDialog(MediaItem item, int position) {
@@ -332,19 +356,16 @@ public class GalleryFragment extends Fragment {
                             if (adapter.getItemCount() == 0) {
                                 showEmptyState();
                             }
-                            android.widget.Toast.makeText(requireContext(), "Файл удалён", 
-                                    android.widget.Toast.LENGTH_SHORT).show();
+                            Toast.makeText(requireContext(), "Файл удалён", Toast.LENGTH_SHORT).show();
                         } else {
-                            android.widget.Toast.makeText(requireContext(), "Не удалось удалить файл", 
-                                    android.widget.Toast.LENGTH_SHORT).show();
+                            Toast.makeText(requireContext(), "Не удалось удалить файл", Toast.LENGTH_SHORT).show();
                         }
                     });
                 }
             } catch (Exception e) {
                 if (isAdded()) {
                     requireActivity().runOnUiThread(() -> 
-                        android.widget.Toast.makeText(requireContext(), "Не удалось удалить файл", 
-                                android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(requireContext(), "Не удалось удалить файл", Toast.LENGTH_SHORT).show()
                     );
                 }
             }
@@ -359,15 +380,13 @@ public class GalleryFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        if (hasRequiredPermissions()) {
-            loadMediaFiles();
-        }
+        loadMediaFiles();
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        if (executor != null) {
+        if (executor != null && !executor.isShutdown()) {
             executor.shutdown();
         }
         binding = null;

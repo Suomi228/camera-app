@@ -21,7 +21,35 @@
         android:id="@+id/galleryFragment"
         android:name="com.example.cameraapp.ui.gallery.GalleryFragment"
         android:label="@string/nav_gallery"
-        tools:layout="@layout/fragment_gallery" />
+        tools:layout="@layout/fragment_gallery">
+        
+        <action
+            android:id="@+id/action_gallery_to_viewer"
+            app:destination="@id/mediaViewerFragment"
+            app:enterAnim="@anim/fade_in"
+            app:exitAnim="@anim/fade_out"
+            app:popEnterAnim="@anim/fade_in"
+            app:popExitAnim="@anim/fade_out" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/mediaViewerFragment"
+        android:name="com.example.cameraapp.ui.viewer.MediaViewerFragment"
+        android:label=""
+        tools:layout="@layout/fragment_media_viewer">
+        
+        <argument
+            android:name="uri"
+            app:argType="string" />
+        <argument
+            android:name="isVideo"
+            app:argType="boolean"
+            android:defaultValue="false" />
+        <argument
+            android:name="displayName"
+            app:argType="string"
+            android:defaultValue="" />
+    </fragment>
 
 </navigation>
 

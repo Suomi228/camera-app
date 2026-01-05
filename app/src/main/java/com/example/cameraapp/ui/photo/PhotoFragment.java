@@ -296,13 +296,21 @@ public class PhotoFragment extends Fragment {
                     public void onImageSaved(@NonNull ImageCapture.OutputFileResults results) {
                         if (!isAdded()) return;
                         binding.btnCapture.setEnabled(true);
-                        Toast.makeText(requireContext(), R.string.photo_saved, Toast.LENGTH_SHORT).show();
                         
-                        if (results.getSavedUri() != null) {
+                        android.net.Uri savedUri = results.getSavedUri();
+                        android.util.Log.d("PhotoFragment", "Photo saved to: " + savedUri);
+                        
+                        if (savedUri != null) {
+                            Toast.makeText(requireContext(), 
+                                "Фото сохранено: " + savedUri, Toast.LENGTH_LONG).show();
+                            
                             com.bumptech.glide.Glide.with(requireContext())
-                                    .load(results.getSavedUri())
+                                    .load(savedUri)
                                     .centerCrop()
                                     .into(binding.imgLastPhoto);
+                        } else {
+                            Toast.makeText(requireContext(), 
+                                "Фото сохранено (URI = null)", Toast.LENGTH_SHORT).show();
                         }
                     }
 
