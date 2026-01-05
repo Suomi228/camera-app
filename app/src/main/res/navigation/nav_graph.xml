@@ -39,16 +39,9 @@
         tools:layout="@layout/fragment_media_viewer">
         
         <argument
-            android:name="uri"
-            app:argType="string" />
-        <argument
-            android:name="isVideo"
-            app:argType="boolean"
-            android:defaultValue="false" />
-        <argument
-            android:name="displayName"
-            app:argType="string"
-            android:defaultValue="" />
+            android:name="position"
+            app:argType="integer"
+            android:defaultValue="0" />
     </fragment>
 
 </navigation>

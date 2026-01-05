@@ -1,14 +1,11 @@
 package com.example.cameraapp.ui.viewer;
 
-import android.net.Uri;
 import android.os.Bundle;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.MediaController;
 import android.widget.Toast;
+import android.widget.VideoView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -17,30 +14,25 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 import androidx.navigation.Navigation;
+import androidx.viewpager2.widget.ViewPager2;
 
-import com.bumptech.glide.Glide;
 import com.example.cameraapp.R;
 import com.example.cameraapp.databinding.FragmentMediaViewerBinding;
+import com.example.cameraapp.ui.gallery.MediaItem;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MediaViewerFragment extends Fragment {
 
     private FragmentMediaViewerBinding binding;
-    private Uri mediaUri;
-    private boolean isVideo;
-    private String displayName;
+    private MediaPagerAdapter adapter;
+    private List<MediaItem> mediaItems;
+    private int initialPosition = 0;
     private ExecutorService executor;
-    
-    private ScaleGestureDetector scaleGestureDetector;
-    private float scaleFactor = 1f;
-    private float translateX = 0f;
-    private float translateY = 0f;
-    private float lastTouchX;
-    private float lastTouchY;
-    private boolean isScaling = false;
+    private boolean isPlaying = false;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container,
@@ -56,19 +48,15 @@ public class MediaViewerFragment extends Fragment {
         
         parseArguments();
         setupEdgeToEdge();
+        setupViewPager();
         setupControls();
-        setupZoomGesture();
-        loadMedia();
     }
 
     private void parseArguments() {
+        mediaItems = MediaCache.getInstance().getMediaItems();
+        
         if (getArguments() != null) {
-            String uriString = getArguments().getString("uri");
-            if (uriString != null) {
-                mediaUri = Uri.parse(uriString);
-            }
-            isVideo = getArguments().getBoolean("isVideo", false);
-            displayName = getArguments().getString("displayName", "");
+            initialPosition = getArguments().getInt("position", 0);
         }
     }
 
@@ -85,139 +73,78 @@ public class MediaViewerFragment extends Fragment {
         });
     }
 
-    private void setupControls() {
-        binding.tvTitle.setText(displayName);
+    private void setupViewPager() {
+        adapter = new MediaPagerAdapter();
+        adapter.setItems(mediaItems);
         
+        adapter.setOnVideoClickListener((videoView, item, position) -> {
+            isPlaying = videoView.isPlaying();
+            updateVideoControls(item);
+        });
+
+        binding.viewPager.setAdapter(adapter);
+        binding.viewPager.setCurrentItem(initialPosition, false);
+        
+        updateUI(initialPosition);
+
+        binding.viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                adapter.pauseCurrentVideo();
+                isPlaying = false;
+                updateUI(position);
+            }
+        });
+    }
+
+    private void updateUI(int position) {
+        MediaItem item = adapter.getItem(position);
+        if (item != null) {
+            binding.tvTitle.setText(item.getDisplayName());
+            updateVideoControls(item);
+            updateCounter(position);
+        }
+    }
+
+    private void updateVideoControls(MediaItem item) {
+        if (item.isVideo()) {
+            binding.videoControls.setVisibility(View.VISIBLE);
+            binding.btnPlayPause.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
+        } else {
+            binding.videoControls.setVisibility(View.GONE);
+        }
+    }
+
+    private void updateCounter(int position) {
+        if (mediaItems.size() > 1) {
+            binding.tvCounter.setVisibility(View.VISIBLE);
+            binding.tvCounter.setText((position + 1) + " / " + mediaItems.size());
+        } else {
+            binding.tvCounter.setVisibility(View.GONE);
+        }
+    }
+
+    private void setupControls() {
         binding.btnBack.setOnClickListener(v -> navigateBack());
         binding.btnDelete.setOnClickListener(v -> showDeleteDialog());
         
         binding.btnPlayPause.setOnClickListener(v -> toggleVideoPlayback());
         
-        binding.viewerContainer.setOnClickListener(v -> toggleControlsVisibility());
-    }
-    
-    private void setupZoomGesture() {
-        scaleGestureDetector = new ScaleGestureDetector(requireContext(),
-                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                    @Override
-                    public boolean onScaleBegin(ScaleGestureDetector detector) {
-                        isScaling = true;
-                        return true;
-                    }
-
-                    @Override
-                    public boolean onScale(ScaleGestureDetector detector) {
-                        scaleFactor *= detector.getScaleFactor();
-                        scaleFactor = Math.max(1f, Math.min(scaleFactor, 5f));
-                        applyTransform();
-                        return true;
-                    }
-
-                    @Override
-                    public void onScaleEnd(ScaleGestureDetector detector) {
-                        isScaling = false;
-                    }
-                });
-
-        binding.imageView.setOnTouchListener((v, event) -> {
-            scaleGestureDetector.onTouchEvent(event);
-
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    lastTouchX = event.getX();
-                    lastTouchY = event.getY();
-                    break;
-
-                case MotionEvent.ACTION_MOVE:
-                    if (!isScaling && scaleFactor > 1f) {
-                        float dx = event.getX() - lastTouchX;
-                        float dy = event.getY() - lastTouchY;
-                        translateX += dx;
-                        translateY += dy;
-                        applyTransform();
-                        lastTouchX = event.getX();
-                        lastTouchY = event.getY();
-                    }
-                    break;
-
-                case MotionEvent.ACTION_UP:
-                    if (!isScaling && scaleFactor == 1f) {
-                        v.performClick();
-                    }
-                    break;
-            }
-            return true;
-        });
-    }
-
-    private void applyTransform() {
-        binding.imageView.setScaleX(scaleFactor);
-        binding.imageView.setScaleY(scaleFactor);
-        binding.imageView.setTranslationX(translateX);
-        binding.imageView.setTranslationY(translateY);
-    }
-
-    private void resetTransform() {
-        scaleFactor = 1f;
-        translateX = 0f;
-        translateY = 0f;
-        applyTransform();
-    }
-
-    private void loadMedia() {
-        if (mediaUri == null) {
-            Toast.makeText(requireContext(), "Ошибка загрузки", Toast.LENGTH_SHORT).show();
-            navigateBack();
-            return;
-        }
-
-        if (isVideo) {
-            loadVideo();
-        } else {
-            loadImage();
-        }
-    }
-
-    private void loadImage() {
-        binding.imageView.setVisibility(View.VISIBLE);
-        binding.videoView.setVisibility(View.GONE);
-        binding.videoControls.setVisibility(View.GONE);
-        binding.progressBar.setVisibility(View.VISIBLE);
-
-        Glide.with(this)
-                .load(mediaUri)
-                .into(binding.imageView);
-        
-        binding.progressBar.setVisibility(View.GONE);
-    }
-
-    private void loadVideo() {
-        binding.imageView.setVisibility(View.GONE);
-        binding.videoView.setVisibility(View.VISIBLE);
-        binding.videoControls.setVisibility(View.VISIBLE);
-        binding.progressBar.setVisibility(View.VISIBLE);
-
-        binding.videoView.setVideoURI(mediaUri);
-        
-        binding.videoView.setOnPreparedListener(mp -> {
-            binding.progressBar.setVisibility(View.GONE);
-            mp.setLooping(true);
-        });
-
-        binding.videoView.setOnErrorListener((mp, what, extra) -> {
-            binding.progressBar.setVisibility(View.GONE);
-            Toast.makeText(requireContext(), "Ошибка воспроизведения видео", Toast.LENGTH_SHORT).show();
-            return true;
-        });
+        binding.viewPager.setOnClickListener(v -> toggleControlsVisibility());
     }
 
     private void toggleVideoPlayback() {
-        if (binding.videoView.isPlaying()) {
-            binding.videoView.pause();
-            binding.btnPlayPause.setImageResource(R.drawable.ic_play);
-        } else {
-            binding.videoView.start();
-            binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
+        VideoView videoView = adapter.getCurrentVideoView();
+        if (videoView != null) {
+            if (videoView.isPlaying()) {
+                videoView.pause();
+                isPlaying = false;
+                binding.btnPlayPause.setImageResource(R.drawable.ic_play);
+            } else {
+                videoView.start();
+                isPlaying = true;
+                binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
+            }
         }
     }
 
@@ -225,18 +152,26 @@ public class MediaViewerFragment extends Fragment {
         if (binding.topBar.getVisibility() == View.VISIBLE) {
             binding.topBar.animate().alpha(0f).setDuration(200)
                     .withEndAction(() -> binding.topBar.setVisibility(View.GONE)).start();
-            if (isVideo) {
-                binding.videoControls.animate().alpha(0f).setDuration(200)
-                        .withEndAction(() -> binding.videoControls.setVisibility(View.GONE)).start();
-            }
+            binding.videoControls.animate().alpha(0f).setDuration(200)
+                    .withEndAction(() -> binding.videoControls.setVisibility(View.GONE)).start();
+            binding.tvCounter.animate().alpha(0f).setDuration(200)
+                    .withEndAction(() -> binding.tvCounter.setVisibility(View.GONE)).start();
         } else {
             binding.topBar.setAlpha(0f);
             binding.topBar.setVisibility(View.VISIBLE);
             binding.topBar.animate().alpha(1f).setDuration(200).start();
-            if (isVideo) {
+            
+            MediaItem currentItem = adapter.getItem(binding.viewPager.getCurrentItem());
+            if (currentItem != null && currentItem.isVideo()) {
                 binding.videoControls.setAlpha(0f);
                 binding.videoControls.setVisibility(View.VISIBLE);
                 binding.videoControls.animate().alpha(1f).setDuration(200).start();
+            }
+            
+            if (mediaItems.size() > 1) {
+                binding.tvCounter.setAlpha(0f);
+                binding.tvCounter.setVisibility(View.VISIBLE);
+                binding.tvCounter.animate().alpha(1f).setDuration(200).start();
             }
         }
     }
@@ -245,20 +180,35 @@ public class MediaViewerFragment extends Fragment {
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.delete_file)
                 .setMessage("Вы уверены, что хотите удалить этот файл?")
-                .setPositiveButton(R.string.delete_file, (dialog, which) -> deleteMedia())
+                .setPositiveButton(R.string.delete_file, (dialog, which) -> deleteCurrentMedia())
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
-    private void deleteMedia() {
+    private void deleteCurrentMedia() {
+        int position = binding.viewPager.getCurrentItem();
+        MediaItem item = adapter.getItem(position);
+        
+        if (item == null) return;
+
         executor.execute(() -> {
             try {
-                int deleted = requireContext().getContentResolver().delete(mediaUri, null, null);
+                int deleted = requireContext().getContentResolver().delete(item.getUri(), null, null);
                 if (isAdded()) {
                     requireActivity().runOnUiThread(() -> {
                         if (deleted > 0) {
                             Toast.makeText(requireContext(), "Файл удалён", Toast.LENGTH_SHORT).show();
-                            navigateBack();
+                            
+                            mediaItems.remove(position);
+                            MediaCache.getInstance().setMediaItems(mediaItems);
+                            
+                            if (mediaItems.isEmpty()) {
+                                navigateBack();
+                            } else {
+                                adapter.removeItem(position);
+                                int newPosition = Math.min(position, mediaItems.size() - 1);
+                                updateUI(newPosition);
+                            }
                         } else {
                             Toast.makeText(requireContext(), "Не удалось удалить файл", Toast.LENGTH_SHORT).show();
                         }
@@ -281,9 +231,7 @@ public class MediaViewerFragment extends Fragment {
     @Override
     public void onPause() {
         super.onPause();
-        if (binding.videoView.isPlaying()) {
-            binding.videoView.pause();
-        }
+        adapter.pauseCurrentVideo();
     }
 
     @Override
@@ -292,8 +240,6 @@ public class MediaViewerFragment extends Fragment {
         if (executor != null && !executor.isShutdown()) {
             executor.shutdown();
         }
-        binding.videoView.stopPlayback();
         binding = null;
     }
 }
-

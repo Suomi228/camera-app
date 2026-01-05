@@ -275,9 +275,6 @@ public class VideoFragment extends Fragment {
         
         binding.btnRecord.setBackgroundResource(R.drawable.capture_button_recording);
         binding.btnRecord.setContentDescription(getString(R.string.stop_recording));
-        binding.btnSwitchCamera.setEnabled(false);
-        binding.btnSwitchCamera.setAlpha(0.5f);
-
         binding.recordingIndicator.setVisibility(View.VISIBLE);
         startRecordingTimer();
         startRecordingDotAnimation();
@@ -334,8 +331,6 @@ public class VideoFragment extends Fragment {
 
         binding.btnRecord.setBackgroundResource(R.drawable.capture_button_background);
         binding.btnRecord.setContentDescription(getString(R.string.start_recording));
-        binding.btnSwitchCamera.setEnabled(true);
-        binding.btnSwitchCamera.setAlpha(1f);
 
         binding.recordingIndicator.setVisibility(View.GONE);
         stopRecordingTimer();
@@ -391,7 +386,9 @@ public class VideoFragment extends Fragment {
     }
 
     private void switchCamera() {
-        if (isRecording) return;
+        if (isRecording) {
+            stopRecording();
+        }
         
         isUsingFrontCamera = !isUsingFrontCamera;
         

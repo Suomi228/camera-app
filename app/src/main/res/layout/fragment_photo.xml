@@ -29,40 +29,22 @@
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintTop_toTopOf="@id/preview_view" />
 
-    <LinearLayout
-        android:id="@+id/top_controls"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:background="@drawable/control_button_background"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="@dimen/spacing_md"
-        android:paddingVertical="@dimen/spacing_sm"
-        app:layout_constraintEnd_toEndOf="parent"
+    <ImageButton
+        android:id="@+id/btn_flash"
+        style="@style/CameraControlButton"
+        android:layout_marginStart="@dimen/spacing_md"
+        android:layout_marginTop="@dimen/spacing_sm"
+        android:contentDescription="@string/flash_mode"
+        android:src="@drawable/ic_flash_off"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <ImageButton
-            android:id="@+id/btn_flash"
-            style="@style/CameraControlButton"
-            android:contentDescription="@string/flash_mode"
-            android:src="@drawable/ic_flash_off" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-    </LinearLayout>
+        app:layout_constraintTop_toTopOf="parent" />
 
     <View
         android:id="@+id/focus_indicator"
         android:layout_width="64dp"
         android:layout_height="64dp"
-        android:alpha="0"
+        android:visibility="invisible"
         android:background="@drawable/focus_indicator"
-        app:layout_constraintBottom_toBottomOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="@id/preview_view"
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintTop_toTopOf="@id/preview_view" />
 

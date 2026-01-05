@@ -79,14 +79,11 @@ public class PhotoFragment extends Fragment {
     }
 
     private void setupEdgeToEdge() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.topControls, (v, windowInsets) -> {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.btnFlash, (v, windowInsets) -> {
             Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars());
-            v.setPadding(
-                    v.getPaddingLeft(),
-                    insets.top + getResources().getDimensionPixelSize(R.dimen.spacing_sm),
-                    v.getPaddingRight(),
-                    v.getPaddingBottom()
-            );
+            ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
+            params.topMargin = insets.top + getResources().getDimensionPixelSize(R.dimen.spacing_sm);
+            v.setLayoutParams(params);
             return WindowInsetsCompat.CONSUMED;
         });
     }
@@ -142,6 +139,7 @@ public class PhotoFragment extends Fragment {
     }
     
     private void showFocusIndicator(float x, float y) {
+        binding.focusIndicator.setVisibility(View.VISIBLE);
         binding.focusIndicator.setX(x - binding.focusIndicator.getWidth() / 2f);
         binding.focusIndicator.setY(y - binding.focusIndicator.getHeight() / 2f);
         binding.focusIndicator.setAlpha(1f);
@@ -157,6 +155,7 @@ public class PhotoFragment extends Fragment {
                             .alpha(0f)
                             .setStartDelay(500)
                             .setDuration(200)
+                            .withEndAction(() -> binding.focusIndicator.setVisibility(View.INVISIBLE))
                             .start()
                 )
                 .start();

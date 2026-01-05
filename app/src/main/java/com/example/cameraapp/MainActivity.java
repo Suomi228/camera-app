@@ -37,8 +37,8 @@ public class MainActivity extends AppCompatActivity {
         WindowInsetsControllerCompat windowInsetsController =
                 WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
         
-        windowInsetsController.setAppearanceLightStatusBars(false);
-        windowInsetsController.setAppearanceLightNavigationBars(false);
+        windowInsetsController.setAppearanceLightStatusBars(true);
+        windowInsetsController.setAppearanceLightNavigationBars(true);
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.mainContainer, (v, windowInsets) -> {
             Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -61,15 +61,26 @@ public class MainActivity extends AppCompatActivity {
         if (navHostFragment != null) {
             navController = navHostFragment.getNavController();
 
-            NavigationUI.setupWithNavController(binding.bottomNavigation, navController);
-
             binding.bottomNavigation.setOnItemSelectedListener(item -> {
-                if (item.getItemId() == navController.getCurrentDestination().getId()) {
-                    return false;
+                int itemId = item.getItemId();
+                
+                if (navController.getCurrentDestination() != null && 
+                    itemId == navController.getCurrentDestination().getId()) {
+                    return true;
                 }
 
-                NavigationUI.onNavDestinationSelected(item, navController);
-                return true;
+                navController.popBackStack(navController.getGraph().getStartDestinationId(), false);
+                
+                if (itemId == R.id.photoFragment) {
+                    return true;
+                } else if (itemId == R.id.videoFragment) {
+                    navController.navigate(R.id.videoFragment);
+                    return true;
+                } else if (itemId == R.id.galleryFragment) {
+                    navController.navigate(R.id.galleryFragment);
+                    return true;
+                }
+                return false;
             });
 
             navController.addOnDestinationChangedListener((controller, destination, arguments) -> {
@@ -77,6 +88,15 @@ public class MainActivity extends AppCompatActivity {
                     binding.bottomNavigation.setVisibility(View.GONE);
                 } else {
                     binding.bottomNavigation.setVisibility(View.VISIBLE);
+                    
+                    int destId = destination.getId();
+                    if (destId == R.id.photoFragment) {
+                        binding.bottomNavigation.getMenu().findItem(R.id.photoFragment).setChecked(true);
+                    } else if (destId == R.id.videoFragment) {
+                        binding.bottomNavigation.getMenu().findItem(R.id.videoFragment).setChecked(true);
+                    } else if (destId == R.id.galleryFragment) {
+                        binding.bottomNavigation.getMenu().findItem(R.id.galleryFragment).setChecked(true);
+                    }
                 }
             });
         }

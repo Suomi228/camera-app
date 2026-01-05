@@ -82,7 +82,7 @@ public class GalleryFragment extends Fragment {
         adapter = new GalleryAdapter(new GalleryAdapter.OnItemClickListener() {
             @Override
             public void onItemClick(MediaItem item, int position) {
-                openMediaViewer(item);
+                openMediaViewer(item, position);
             }
 
             @Override
@@ -326,11 +326,11 @@ public class GalleryFragment extends Fragment {
         binding.rvGallery.setVisibility(View.GONE);
     }
 
-    private void openMediaViewer(MediaItem item) {
+    private void openMediaViewer(MediaItem item, int position) {
+        com.example.cameraapp.ui.viewer.MediaCache.getInstance().setMediaItems(adapter.getItems());
+        
         Bundle args = new Bundle();
-        args.putString("uri", item.getUri().toString());
-        args.putBoolean("isVideo", item.isVideo());
-        args.putString("displayName", item.getDisplayName());
+        args.putInt("position", position);
         
         Navigation.findNavController(binding.getRoot())
                 .navigate(R.id.action_gallery_to_viewer, args);

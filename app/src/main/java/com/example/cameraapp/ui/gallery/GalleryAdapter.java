@@ -84,6 +84,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.GalleryV
         return null;
     }
 
+    public List<MediaItem> getItems() {
+        return new ArrayList<>(items);
+    }
+
     @NonNull
     @Override
     public GalleryViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
