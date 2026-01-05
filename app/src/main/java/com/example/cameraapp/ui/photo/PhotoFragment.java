@@ -1,10 +1,14 @@
 package com.example.cameraapp.ui.photo;
 
 import android.Manifest;
+import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
@@ -13,6 +17,15 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.camera.core.Camera;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.MeteringPoint;
+import androidx.camera.core.MeteringPointFactory;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -22,16 +35,28 @@ import androidx.navigation.Navigation;
 
 import com.example.cameraapp.R;
 import com.example.cameraapp.databinding.FragmentPhotoBinding;
+import com.google.common.util.concurrent.ListenableFuture;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 public class PhotoFragment extends Fragment {
 
     private FragmentPhotoBinding binding;
     private boolean isUsingFrontCamera = false;
-    private int flashMode = 0;
+    private int flashMode = ImageCapture.FLASH_MODE_OFF;
+
+    private ProcessCameraProvider cameraProvider;
+    private Camera camera;
+    private ImageCapture imageCapture;
+    private Preview preview;
+    
+    private ScaleGestureDetector scaleGestureDetector;
+    private float currentZoomRatio = 1f;
 
     private final ActivityResultLauncher<String[]> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(),
@@ -49,6 +74,7 @@ public class PhotoFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         setupEdgeToEdge();
         setupControls();
+        setupZoomGesture();
         checkPermissions();
     }
 
@@ -71,6 +97,69 @@ public class PhotoFragment extends Fragment {
         binding.btnFlash.setOnClickListener(v -> toggleFlash());
         binding.lastPhotoCard.setOnClickListener(v -> navigateToGallery());
         binding.btnGrantPermission.setOnClickListener(v -> requestPermissions());
+    }
+    
+    private void setupZoomGesture() {
+        scaleGestureDetector = new ScaleGestureDetector(requireContext(), 
+            new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScale(ScaleGestureDetector detector) {
+                    if (camera == null) return true;
+                    
+                    float scaleFactor = detector.getScaleFactor();
+                    currentZoomRatio *= scaleFactor;
+                    
+                    float minZoom = camera.getCameraInfo().getZoomState().getValue().getMinZoomRatio();
+                    float maxZoom = camera.getCameraInfo().getZoomState().getValue().getMaxZoomRatio();
+                    currentZoomRatio = Math.max(minZoom, Math.min(currentZoomRatio, maxZoom));
+                    
+                    camera.getCameraControl().setZoomRatio(currentZoomRatio);
+                    return true;
+                }
+            });
+    }
+    
+    private void setupTapToFocus() {
+        binding.previewView.setOnTouchListener((v, event) -> {
+            scaleGestureDetector.onTouchEvent(event);
+            
+            if (event.getAction() == MotionEvent.ACTION_UP && !scaleGestureDetector.isInProgress()) {
+                focusOnPoint(event.getX(), event.getY());
+            }
+            return true;
+        });
+    }
+    
+    private void focusOnPoint(float x, float y) {
+        if (camera == null) return;
+        
+        MeteringPointFactory factory = binding.previewView.getMeteringPointFactory();
+        MeteringPoint point = factory.createPoint(x, y);
+        FocusMeteringAction action = new FocusMeteringAction.Builder(point).build();
+        
+        camera.getCameraControl().startFocusAndMetering(action);
+        showFocusIndicator(x, y);
+    }
+    
+    private void showFocusIndicator(float x, float y) {
+        binding.focusIndicator.setX(x - binding.focusIndicator.getWidth() / 2f);
+        binding.focusIndicator.setY(y - binding.focusIndicator.getHeight() / 2f);
+        binding.focusIndicator.setAlpha(1f);
+        binding.focusIndicator.setScaleX(1.5f);
+        binding.focusIndicator.setScaleY(1.5f);
+        
+        binding.focusIndicator.animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(200)
+                .withEndAction(() -> 
+                    binding.focusIndicator.animate()
+                            .alpha(0f)
+                            .setStartDelay(500)
+                            .setDuration(200)
+                            .start()
+                )
+                .start();
     }
 
     private void checkPermissions() {
@@ -119,16 +208,112 @@ public class PhotoFragment extends Fragment {
     private void showCameraPreview() {
         binding.permissionLayout.setVisibility(View.GONE);
         binding.previewView.setVisibility(View.VISIBLE);
+        startCamera();
     }
 
     private void showPermissionRequest() {
         binding.permissionLayout.setVisibility(View.VISIBLE);
         binding.previewView.setVisibility(View.GONE);
     }
+    
+    private void startCamera() {
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = 
+                ProcessCameraProvider.getInstance(requireContext());
+        
+        cameraProviderFuture.addListener(() -> {
+            try {
+                cameraProvider = cameraProviderFuture.get();
+                bindCameraUseCases();
+            } catch (ExecutionException | InterruptedException e) {
+                Toast.makeText(requireContext(), R.string.error_camera_init, Toast.LENGTH_SHORT).show();
+            }
+        }, ContextCompat.getMainExecutor(requireContext()));
+    }
+    
+    private void bindCameraUseCases() {
+        if (cameraProvider == null || !isAdded()) return;
+        
+        cameraProvider.unbindAll();
+        
+        CameraSelector cameraSelector = new CameraSelector.Builder()
+                .requireLensFacing(isUsingFrontCamera ? 
+                        CameraSelector.LENS_FACING_FRONT : CameraSelector.LENS_FACING_BACK)
+                .build();
+        
+        preview = new Preview.Builder().build();
+        preview.setSurfaceProvider(binding.previewView.getSurfaceProvider());
+        
+        imageCapture = new ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setFlashMode(flashMode)
+                .build();
+        
+        try {
+            camera = cameraProvider.bindToLifecycle(
+                    getViewLifecycleOwner(),
+                    cameraSelector,
+                    preview,
+                    imageCapture
+            );
+            
+            currentZoomRatio = 1f;
+            setupTapToFocus();
+            
+        } catch (Exception e) {
+            Toast.makeText(requireContext(), R.string.error_camera_init, Toast.LENGTH_SHORT).show();
+        }
+    }
 
     private void capturePhoto() {
+        if (imageCapture == null) return;
+        
+        binding.btnCapture.setEnabled(false);
+        
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                .format(System.currentTimeMillis());
+        String fileName = "IMG_" + timestamp + ".jpg";
+        
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/CameraApp");
+        }
+        
+        ImageCapture.OutputFileOptions outputOptions = new ImageCapture.OutputFileOptions.Builder(
+                requireContext().getContentResolver(),
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+        ).build();
+        
         animateFlash();
-        Toast.makeText(requireContext(), R.string.photo_saved, Toast.LENGTH_SHORT).show();
+        
+        imageCapture.takePicture(
+                outputOptions,
+                ContextCompat.getMainExecutor(requireContext()),
+                new ImageCapture.OnImageSavedCallback() {
+                    @Override
+                    public void onImageSaved(@NonNull ImageCapture.OutputFileResults results) {
+                        if (!isAdded()) return;
+                        binding.btnCapture.setEnabled(true);
+                        Toast.makeText(requireContext(), R.string.photo_saved, Toast.LENGTH_SHORT).show();
+                        
+                        if (results.getSavedUri() != null) {
+                            com.bumptech.glide.Glide.with(requireContext())
+                                    .load(results.getSavedUri())
+                                    .centerCrop()
+                                    .into(binding.imgLastPhoto);
+                        }
+                    }
+
+                    @Override
+                    public void onError(@NonNull ImageCaptureException exception) {
+                        if (!isAdded()) return;
+                        binding.btnCapture.setEnabled(true);
+                        Toast.makeText(requireContext(), R.string.error_save_file, Toast.LENGTH_SHORT).show();
+                    }
+                }
+        );
     }
 
     private void animateFlash() {
@@ -154,43 +339,60 @@ public class PhotoFragment extends Fragment {
                 .setDuration(300)
                 .start();
 
-        String cameraName = isUsingFrontCamera ? "фронтальную" : "основную";
-        Toast.makeText(requireContext(), "Переключено на " + cameraName + " камеру", 
-                Toast.LENGTH_SHORT).show();
+        bindCameraUseCases();
     }
 
     private void toggleFlash() {
-        flashMode = (flashMode + 1) % 3;
-        
-        int iconRes;
-        String modeName;
         switch (flashMode) {
-            case 1:
-                iconRes = R.drawable.ic_flash_on;
-                modeName = "Вспышка включена";
+            case ImageCapture.FLASH_MODE_OFF:
+                flashMode = ImageCapture.FLASH_MODE_ON;
+                binding.btnFlash.setImageResource(R.drawable.ic_flash_on);
+                Toast.makeText(requireContext(), "Вспышка включена", Toast.LENGTH_SHORT).show();
                 break;
-            case 2:
-                iconRes = R.drawable.ic_flash_auto;
-                modeName = "Авто вспышка";
+            case ImageCapture.FLASH_MODE_ON:
+                flashMode = ImageCapture.FLASH_MODE_AUTO;
+                binding.btnFlash.setImageResource(R.drawable.ic_flash_auto);
+                Toast.makeText(requireContext(), "Авто вспышка", Toast.LENGTH_SHORT).show();
                 break;
             default:
-                iconRes = R.drawable.ic_flash_off;
-                modeName = "Вспышка выключена";
+                flashMode = ImageCapture.FLASH_MODE_OFF;
+                binding.btnFlash.setImageResource(R.drawable.ic_flash_off);
+                Toast.makeText(requireContext(), "Вспышка выключена", Toast.LENGTH_SHORT).show();
                 break;
         }
         
-        binding.btnFlash.setImageResource(iconRes);
-        Toast.makeText(requireContext(), modeName, Toast.LENGTH_SHORT).show();
+        if (imageCapture != null) {
+            imageCapture.setFlashMode(flashMode);
+        }
     }
 
     private void navigateToGallery() {
         Navigation.findNavController(binding.getRoot())
                 .navigate(R.id.galleryFragment);
     }
+    
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (hasRequiredPermissions() && cameraProvider != null) {
+            bindCameraUseCases();
+        }
+    }
+    
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
+    }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
         binding = null;
     }
 }
